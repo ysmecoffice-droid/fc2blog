@@ -2,7 +2,6 @@ import os
 import datetime
 import smtplib
 import base64
-import random
 import google.generativeai as genai
 import markdown
 from email.mime.multipart import MIMEMultipart
@@ -21,24 +20,21 @@ SMTP_PORT = 587
 genai.configure(api_key=GEMINI_API_KEY)
 
 def generate_infographic(text_content):
-    """画像生成モデルでインフォグラフィック生成"""
-    # 確実に存在するモデル名に変更
-    model_image = genai.GenerativeModel('gemini-1.5-flash')
+    """画像生成を試みる（失敗しても記事投稿は継続する）"""
+    # 最も汎用的なモデル名に変更
+    model_image = genai.GenerativeModel('gemini-pro')
     try:
         prompt = f"Create a simple, professional infographic summarizing the following content. Use clear icons and layout, no complex text: {text_content}"
         
-        # モデルが画像生成（response_modalities）に対応しているか、
-        # またはテキストから画像生成を試みる設定。非対応環境を考慮しtry-exceptで保護
-        response = model_image.generate_content(
-            contents=[{'parts': [{'text': prompt}]}]
-        )
+        # テキスト生成として呼び出し、画像データが含まれるか確認
+        response = model_image.generate_content(prompt)
         
-        # インラインデータの抽出
+        # 応答に画像データ（inline_data）が含まれているかチェック
         image_part = next((p for p in response.candidates[0].content.parts if p.inline_data), None)
         if image_part:
             return image_part.inline_data.data
     except Exception as e:
-        print(f"画像生成スキップ（非対応またはエラー）: {e}")
+        print(f"画像生成スキップ（モデル非対応またはエラー）: {e}")
     return None
 
 def send_blog_email(title, md_content, img_base64):
@@ -58,10 +54,13 @@ def send_blog_email(title, md_content, img_base64):
     msg.attach(MIMEText(html_body, 'html'))
 
     if img_base64:
-        img_data = base64.b64decode(img_base64)
-        img = MIMEImage(img_data)
-        img.add_header('Content-ID', '<info_img>')
-        msg.attach(img)
+        try:
+            img_data = base64.b64decode(img_base64)
+            img = MIMEImage(img_data)
+            img.add_header('Content-ID', '<info_img>')
+            msg.attach(img)
+        except Exception as e:
+            print(f"画像添付エラー: {e}")
 
     try:
         with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
@@ -93,8 +92,8 @@ def main():
     unused_neta = [l for l in lines if not l.startswith("[済]")]
     if len(unused_neta) < 20:
         print("ネタを補充中...")
-        # 安定版モデル名を使用
-        model_neta = genai.GenerativeModel('gemini-1.5-flash')
+        # 確実に存在するモデル名 'gemini-pro' を使用
+        model_neta = genai.GenerativeModel('gemini-pro')
         prompt = f"Create 20 blog post ideas in 1 line each based on:\n{neta_rule}"
         res_neta = model_neta.generate_content(prompt)
         new_items = [l.strip() for l in res_neta.text.split('\n') if l.strip() and not l.startswith(('[', '1', '2'))]
@@ -113,7 +112,7 @@ def main():
     # 記事執筆
     print(f"執筆中: {target_topic}")
     model_write = genai.GenerativeModel(
-        model_name='gemini-1.5-flash',
+        model_name='gemini-pro',
         system_instruction=writing_rule
     )
     article_res = model_write.generate_content(f"テーマ: {target_topic}")
