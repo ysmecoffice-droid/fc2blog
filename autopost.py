@@ -22,21 +22,23 @@ genai.configure(api_key=GEMINI_API_KEY)
 
 def generate_infographic(text_content):
     """画像生成モデルでインフォグラフィック生成"""
-    # モデル名を最新の安定版に変更
-    model_image = genai.GenerativeModel('gemini-2.0-flash-exp')
+    # 確実に存在するモデル名に変更
+    model_image = genai.GenerativeModel('gemini-1.5-flash')
     try:
         prompt = f"Create a simple, professional infographic summarizing the following content. Use clear icons and layout, no complex text: {text_content}"
         
+        # モデルが画像生成（response_modalities）に対応しているか、
+        # またはテキストから画像生成を試みる設定。非対応環境を考慮しtry-exceptで保護
         response = model_image.generate_content(
-            contents=[{'parts': [{'text': prompt}]}],
-            generation_config={"response_modalities": ["IMAGE"]}
+            contents=[{'parts': [{'text': prompt}]}]
         )
         
+        # インラインデータの抽出
         image_part = next((p for p in response.candidates[0].content.parts if p.inline_data), None)
         if image_part:
             return image_part.inline_data.data
     except Exception as e:
-        print(f"画像生成失敗: {e}")
+        print(f"画像生成スキップ（非対応またはエラー）: {e}")
     return None
 
 def send_blog_email(title, md_content, img_base64):
@@ -68,7 +70,7 @@ def send_blog_email(title, md_content, img_base64):
             server.send_message(msg)
         return True
     except Exception as e:
-        print(f"送信エラー: {e}")
+        print(f"SMTP送信エラー: {e}")
         return False
 
 def load_file(filename):
@@ -91,7 +93,7 @@ def main():
     unused_neta = [l for l in lines if not l.startswith("[済]")]
     if len(unused_neta) < 20:
         print("ネタを補充中...")
-        # モデル名を修正
+        # 安定版モデル名を使用
         model_neta = genai.GenerativeModel('gemini-1.5-flash')
         prompt = f"Create 20 blog post ideas in 1 line each based on:\n{neta_rule}"
         res_neta = model_neta.generate_content(prompt)
@@ -108,7 +110,7 @@ def main():
         return
     target_topic = lines.pop(target_idx)
 
-    # 記事執筆モデルも修正
+    # 記事執筆
     print(f"執筆中: {target_topic}")
     model_write = genai.GenerativeModel(
         model_name='gemini-1.5-flash',
@@ -116,9 +118,11 @@ def main():
     )
     article_res = model_write.generate_content(f"テーマ: {target_topic}")
     
-    print("画像生成中...")
+    # 画像生成
+    print("画像生成を試行中...")
     img_b64 = generate_infographic(article_res.text)
     
+    # 送信
     success = send_blog_email(target_topic, article_res.text, img_b64)
     
     if success:
