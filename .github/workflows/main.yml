@@ -1,16 +1,7 @@
 name: Blog Autopost Test
 
 on:
-
-手動実行用ボタンを有効にする
-
 workflow_dispatch:
-
-定期実行設定（例：毎日午前9時に実行）
-
-schedule:
-
-- cron: '0 0 * * *'
 
 jobs:
 build:
