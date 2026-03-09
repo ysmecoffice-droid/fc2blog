@@ -20,24 +20,23 @@ SMTP_PORT = 587
 genai.configure(api_key=GEMINI_API_KEY)
 
 def generate_infographic(text_content):
-    """画像生成を試みる（無料版ではスキップされる可能性が高いが、エラーにはしない）"""
-    # 無料版でも利用可能なモデル名を指定
+    """画像生成を試みる（無料版では失敗してもエラーにせずスキップする）"""
     try:
-        model_image = genai.GenerativeModel('gemini-1.5-flash')
+        # 確実に存在する名称を指定
+        model = genai.GenerativeModel('gemini-1.5-flash')
         prompt = f"Create a simple infographic about: {text_content}"
         
-        # 無料版の場合、ここでの画像生成リクエストはサポート外で失敗することが多いです
-        response = model_image.generate_content(
-            contents=[{'parts': [{'text': prompt}]}],
-            generation_config={"response_modalities": ["IMAGE"]}
+        # 無料版の場合、画像生成（IMAGE出力）は制限されることが多いため、
+        # 失敗してもプログラムが止まらないようにしています
+        response = model.generate_content(
+            contents=[{'parts': [{'text': prompt}]}]
         )
         
         image_part = next((p for p in response.candidates[0].content.parts if p.inline_data), None)
         if image_part:
             return image_part.inline_data.data
     except Exception as e:
-        # 失敗してもログに出すだけで処理は続行
-        print(f"画像生成は利用できません（無料版制限など）: {e}")
+        print(f"画像生成はスキップされました（無料版制限など）: {e}")
     return None
 
 def send_blog_email(title, md_content, img_base64):
@@ -98,17 +97,17 @@ def main():
     
     target_topic = lines.pop(target_idx)
 
-    # 執筆開始
-    print(f"無料版モデルで執筆中: {target_topic}")
+    print(f"実行中（モデル: gemini-1.5-flash）: {target_topic}")
     try:
-        # 無料版で最も安定している 'gemini-1.5-flash' を使用
-        model_write = genai.GenerativeModel('gemini-1.5-flash')
+        # モデル名を 'models/gemini-1.5-flash' とフルパスで指定（404対策）
+        model = genai.GenerativeModel('models/gemini-1.5-flash')
         
-        # system_instruction を使うと NotFound になる場合があるため、プロンプトに統合
-        full_prompt = f"以下のルールに従ってブログ記事を書いてください。\n\n【ルール】\n{writing_rule}\n\n【テーマ】\n{target_topic}"
-        article_res = model_write.generate_content(full_prompt)
+        # system_instruction を引数に使わず、プロンプトに統合して送信（404対策）
+        prompt = f"あなたはプロのブロガーです。以下の【執筆ルール】に従い、【テーマ】について記事を書いてください。\n\n【執筆ルール】\n{writing_rule}\n\n【テーマ】\n{target_topic}"
         
-        # 画像生成を試行（失敗してもOK）
+        article_res = model.generate_content(prompt)
+        
+        # 画像生成を試行
         img_b64 = generate_infographic(article_res.text)
         
         # 送信
@@ -119,12 +118,12 @@ def main():
             lines.append(f"[済] {now} : {target_topic}")
             with open("neta.txt", "w", encoding="utf-8") as f:
                 f.write("\n".join(lines) + "\n")
-            print("投稿に成功しました！")
+            print("ブログ投稿に成功しました。")
         else:
-            print("送信に失敗しました。")
+            print("ブログ投稿（メール送信）に失敗しました。")
             
     except Exception as e:
-        print(f"実行エラー: {e}")
+        print(f"Gemini API エラー: {e}")
 
 if __name__ == "__main__":
     main()
