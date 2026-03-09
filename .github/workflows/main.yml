@@ -29,7 +29,7 @@ jobs:
           FC2_POST_EMAIL: ${{ secrets.FC2_POST_EMAIL }}
           SMTP_USER: ${{ secrets.SMTP_USER }}
           SMTP_PASS: ${{ secrets.SMTP_PASS }}
-        run: python autopost.py
+        run: python debug_settings.py
 
       - name: Commit and Push changes
         run: |
