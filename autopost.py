@@ -26,17 +26,14 @@ def generate_infographic(text_content):
         model = genai.GenerativeModel('gemini-1.5-flash')
         prompt = f"Create a simple infographic about: {text_content}"
         
-        # 無料版の場合、画像生成（IMAGE出力）は制限されることが多いため、
-        # 失敗してもプログラムが止まらないようにしています
-        response = model.generate_content(
-            contents=[{'parts': [{'text': prompt}]}]
-        )
+        # 無料版の場合、IMAGE出力は制限されることが多いためtry-exceptで保護
+        response = model.generate_content(prompt)
         
         image_part = next((p for p in response.candidates[0].content.parts if p.inline_data), None)
         if image_part:
             return image_part.inline_data.data
     except Exception as e:
-        print(f"画像生成はスキップされました（無料版制限など）: {e}")
+        print(f"画像生成はスキップされました: {e}")
     return None
 
 def send_blog_email(title, md_content, img_base64):
@@ -90,6 +87,7 @@ def main():
     with open("neta.txt", "r", encoding="utf-8") as f:
         lines = [l.strip() for l in f.readlines() if l.strip()]
 
+    # ネタ切れチェック
     target_idx = next((i for i, l in enumerate(lines) if not l.startswith("[済]")), -1)
     if target_idx == -1:
         print("投稿できるネタがありません。")
@@ -97,33 +95,39 @@ def main():
     
     target_topic = lines.pop(target_idx)
 
-    print(f"実行中（モデル: gemini-1.5-flash）: {target_topic}")
+    print(f"モデル models/gemini-1.5-flash で実行中: {target_topic}")
     try:
-        # モデル名を 'models/gemini-1.5-flash' とフルパスで指定（404対策）
+        # モデル名をフルパス 'models/gemini-1.5-flash' で指定して404を回避
         model = genai.GenerativeModel('models/gemini-1.5-flash')
         
-        # system_instruction を引数に使わず、プロンプトに統合して送信（404対策）
-        prompt = f"あなたはプロのブロガーです。以下の【執筆ルール】に従い、【テーマ】について記事を書いてください。\n\n【執筆ルール】\n{writing_rule}\n\n【テーマ】\n{target_topic}"
+        # エラーの原因になりやすい引数を避け、プロンプトに全てを詰め込む
+        prompt = (
+            f"あなたはプロのブロガーです。以下の【ルール】を守って、【テーマ】について読者が喜ぶ記事を書いてください。\n\n"
+            f"【ルール】\n{writing_rule}\n\n"
+            f"【テーマ】\n{target_topic}"
+        )
         
-        article_res = model.generate_content(prompt)
+        # 記事生成
+        response = model.generate_content(prompt)
+        article_text = response.text
         
-        # 画像生成を試行
-        img_b64 = generate_infographic(article_res.text)
+        # 画像生成（オプション）
+        img_b64 = generate_infographic(article_text)
         
         # 送信
-        success = send_blog_email(target_topic, article_res.text, img_b64)
+        success = send_blog_email(target_topic, article_text, img_b64)
         
         if success:
             now = datetime.datetime.now().strftime("%Y-%m-%d")
             lines.append(f"[済] {now} : {target_topic}")
             with open("neta.txt", "w", encoding="utf-8") as f:
                 f.write("\n".join(lines) + "\n")
-            print("ブログ投稿に成功しました。")
+            print("--- 投稿成功 ---")
         else:
-            print("ブログ投稿（メール送信）に失敗しました。")
+            print("--- 送信失敗 ---")
             
     except Exception as e:
-        print(f"Gemini API エラー: {e}")
+        print(f"重大なエラーが発生しました: {e}")
 
 if __name__ == "__main__":
     main()
