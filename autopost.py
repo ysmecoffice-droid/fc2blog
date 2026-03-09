@@ -17,23 +17,24 @@ SMTP_HOST = "smtp.gmail.com"
 SMTP_PORT = 587
 
 # Gemini API の初期化
+# 安全のため v1 エンドポイントを明示的に指定する場合があるが、ライブラリの標準設定に従う
 genai.configure(api_key=GEMINI_API_KEY)
 
 def generate_infographic(text_content):
-    """画像生成を試みる（無料版では失敗してもエラーにせずスキップする）"""
+    """画像生成を試みる（無料版ではスキップされる可能性が高い）"""
     try:
-        # 確実に存在する名称を指定
+        # 無料版で最も汎用的な名称を使用
         model = genai.GenerativeModel('gemini-1.5-flash')
         prompt = f"Create a simple infographic about: {text_content}"
         
-        # 無料版の場合、IMAGE出力は制限されることが多いためtry-exceptで保護
+        # 404エラーを避けるため、最もシンプルな生成メソッドを使用
         response = model.generate_content(prompt)
         
         image_part = next((p for p in response.candidates[0].content.parts if p.inline_data), None)
         if image_part:
             return image_part.inline_data.data
     except Exception as e:
-        print(f"画像生成はスキップされました: {e}")
+        print(f"画像生成スキップ: {e}")
     return None
 
 def send_blog_email(title, md_content, img_base64):
@@ -87,7 +88,6 @@ def main():
     with open("neta.txt", "r", encoding="utf-8") as f:
         lines = [l.strip() for l in f.readlines() if l.strip()]
 
-    # ネタ切れチェック
     target_idx = next((i for i, l in enumerate(lines) if not l.startswith("[済]")), -1)
     if target_idx == -1:
         print("投稿できるネタがありません。")
@@ -95,39 +95,52 @@ def main():
     
     target_topic = lines.pop(target_idx)
 
-    print(f"モデル models/gemini-1.5-flash で実行中: {target_topic}")
-    try:
-        # モデル名をフルパス 'models/gemini-1.5-flash' で指定して404を回避
-        model = genai.GenerativeModel('models/gemini-1.5-flash')
-        
-        # エラーの原因になりやすい引数を避け、プロンプトに全てを詰め込む
-        prompt = (
-            f"あなたはプロのブロガーです。以下の【ルール】を守って、【テーマ】について読者が喜ぶ記事を書いてください。\n\n"
-            f"【ルール】\n{writing_rule}\n\n"
-            f"【テーマ】\n{target_topic}"
-        )
-        
-        # 記事生成
-        response = model.generate_content(prompt)
-        article_text = response.text
-        
+    print(f"モデル起動中: {target_topic}")
+    
+    # --- 重要: 404対策のモデル名指定 ---
+    # models/ を付けない 'gemini-1.5-flash' を試し、
+    # 失敗した場合は 'gemini-pro' に切り替える二段構えにします。
+    
+    success_gen = False
+    article_text = ""
+    
+    for model_name in ['gemini-1.5-flash', 'gemini-pro']:
+        try:
+            print(f"試行中のモデル: {model_name}")
+            model = genai.GenerativeModel(model_name)
+            
+            prompt = (
+                f"あなたはプロのブロガーです。以下の【ルール】を守って、【テーマ】について記事を書いてください。\n\n"
+                f"【ルール】\n{writing_rule}\n\n"
+                f"【テーマ】\n{target_topic}"
+            )
+            
+            response = model.generate_content(prompt)
+            article_text = response.text
+            success_gen = True
+            print(f"生成成功: {model_name}")
+            break
+        except Exception as e:
+            print(f"{model_name} でのエラー: {e}")
+            continue
+
+    if success_gen:
         # 画像生成（オプション）
         img_b64 = generate_infographic(article_text)
         
         # 送信
-        success = send_blog_email(target_topic, article_text, img_b64)
+        success_mail = send_blog_email(target_topic, article_text, img_b64)
         
-        if success:
+        if success_mail:
             now = datetime.datetime.now().strftime("%Y-%m-%d")
             lines.append(f"[済] {now} : {target_topic}")
             with open("neta.txt", "w", encoding="utf-8") as f:
                 f.write("\n".join(lines) + "\n")
-            print("--- 投稿成功 ---")
+            print("ブログ投稿完了")
         else:
-            print("--- 送信失敗 ---")
-            
-    except Exception as e:
-        print(f"重大なエラーが発生しました: {e}")
+            print("送信失敗")
+    else:
+        print("すべてのモデルで生成に失敗しました。APIキーまたはリージョンの制限を確認してください。")
 
 if __name__ == "__main__":
     main()
