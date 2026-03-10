@@ -7,7 +7,6 @@ import requests
 import markdown
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from email.mime.image import MIMEImage
 
 # --- GitHub Secrets から設定を取得 ---
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -19,35 +18,40 @@ SMTP_PORT = 587
 
 def call_gemini_api(prompt):
     """
-    Google AI Studio の REST API (v1 安定版) を直接呼び出す。
-    ライブラリの 404 エラーを回避するための最も確実な方法です。
+    モデル名やAPIバージョンの違いによる 404 エラーを回避するため
+    複数の組み合わせで試行する頑健な呼び出し関数です。
     """
-    # 安定版 v1 エンドポイントを使用
-    url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+    # 試行するモデル名の候補
+    models = ["gemini-1.5-flash", "gemini-1.5-flash-latest", "gemini-pro"]
+    # 試行するAPIバージョンの候補
+    api_versions = ["v1", "v1beta"]
     
-    headers = {
-        "Content-Type": "application/json"
-    }
-    
-    payload = {
-        "contents": [{
-            "parts": [{"text": prompt}]
-        }]
-    }
+    headers = {"Content-Type": "application/json"}
+    payload = {"contents": [{"parts": [{"text": prompt}]}]}
 
-    try:
-        response = requests.post(url, headers=headers, data=json.dumps(payload))
-        response.raise_for_status()
-        result = response.json()
-        return result['candidates'][0]['content']['parts'][0]['text']
-    except Exception as e:
-        print(f"Gemini API 直接呼び出しエラー: {e}")
-        if response.text:
-            print(f"エラー詳細: {response.text}")
-        return None
+    for version in api_versions:
+        for model in models:
+            url = f"https://generativelanguage.googleapis.com/{version}/models/{model}:generateContent?key={GEMINI_API_KEY}"
+            print(f"試行中: {version}/{model}...")
+            
+            try:
+                response = requests.post(url, headers=headers, data=json.dumps(payload), timeout=30)
+                if response.status_code == 200:
+                    result = response.json()
+                    content = result['candidates'][0]['content']['parts'][0]['text']
+                    print(f"成功: {version}/{model} で記事を生成しました。")
+                    return content
+                else:
+                    print(f"失敗: {version}/{model} (Status: {response.status_code})")
+                    continue
+            except Exception as e:
+                print(f"通信エラー: {e}")
+                continue
+                
+    return None
 
 def send_blog_email(title, md_content):
-    """メールを介してFC2ブログへ投稿（今回は確実に記事を送るため画像なしのシンプル版）"""
+    """メールを介してFC2ブログへ投稿"""
     msg = MIMEMultipart()
     msg['Subject'] = title
     msg['From'] = SMTP_USER
@@ -55,7 +59,16 @@ def send_blog_email(title, md_content):
 
     # MarkdownをHTMLに変換
     html_main = markdown.markdown(md_content)
-    msg.attach(MIMEText(html_main, 'html'))
+    
+    # 簡単な装飾を追加
+    html_body = f"""
+    <html>
+    <body style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #333; line-height: 1.6;">
+        {html_main}
+    </body>
+    </html>
+    """
+    msg.attach(MIMEText(html_body, 'html'))
 
     # SMTP送信
     try:
@@ -89,16 +102,16 @@ def main():
         return
     
     target_topic = lines[target_idx]
-    print(f"開始（REST API v1 使用）: {target_topic}")
+    print(f"処理開始: {target_topic}")
 
     # プロンプト作成
     full_prompt = (
-        f"あなたはプロのブロガーです。以下の【執筆ルール】を厳守し、【テーマ】についてMarkdown形式で執筆してください。\n\n"
+        f"以下の【執筆ルール】に従い、【テーマ】について読者に役立つブログ記事をMarkdown形式で書いてください。\n\n"
         f"【執筆ルール】\n{writing_rule}\n\n"
         f"【テーマ】\n{target_topic}"
     )
 
-    # 記事生成
+    # 記事生成（404回避ロジック付き）
     article_text = call_gemini_api(full_prompt)
     
     if article_text:
@@ -110,9 +123,9 @@ def main():
                 f.write("\n".join(lines) + "\n")
             print(f"完了: '{target_topic}' の投稿に成功しました。")
         else:
-            print("エラー: 送信に失敗しました。")
+            print("エラー: メール送信に失敗しました。")
     else:
-        print("エラー: 記事の生成に失敗しました。")
+        print("エラー: 記事生成に失敗しました（すべてのモデル/バージョンで404または拒否）。")
 
 if __name__ == "__main__":
     main()
